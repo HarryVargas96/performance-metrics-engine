@@ -11,3 +11,7 @@ __pycache__/
 # Cachés de IDEs
 .vscode/
 .idea/
+# Datos locales
+data/
+*.parquet
+*.csv
