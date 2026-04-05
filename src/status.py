@@ -4,11 +4,17 @@ Este módulo recopila datos fisiológicos, tendencias de carga de 8 semanas
 y sensaciones subjetivas para enviarlos como contexto a un modelo de IA.
 """
 
+import os
+import sys
 import pandas as pd
 import json
 import logging
 from datetime import datetime, timedelta
-from src.core. athlete import AthleteProfile
+
+# Garantizar visibilidad del módulo raíz
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.core.athlete import AthleteProfile
 from src.services.sync import run_historical_sync, generate_pmc_report
 
 # Configuración de registro local
@@ -49,7 +55,8 @@ def get_llm_context(days_back=90) -> dict:
     
     # 2. Resumen detallado: Últimos 7 días activos
     semana_atras = hoy - pd.Timedelta(days=7)
-    df_recent = df_history[pd.to_datetime(df_history['date']).dt.normalize() >= semana_atras].sort_values('date')
+    # Forzamos tz_localize(None) para evitar error de comparación con 'hoy' (naive)
+    df_recent = df_history[pd.to_datetime(df_history['date'], utc=True).dt.tz_localize(None).dt.normalize() >= semana_atras].sort_values('date')
     
     last_7_days_list = []
     for _, row in df_recent.iterrows():
