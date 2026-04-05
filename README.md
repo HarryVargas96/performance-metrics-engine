@@ -18,6 +18,18 @@ Motor de rendimiento fisiológico de grado profesional para ciclistas y atletas 
 
 Sigue estos pasos para tener tu motor funcionando en menos de 5 minutos:
 
+### 0. Requisitos Previos y Clonación
+Para usar este proyecto en Windows, se recomienda tener instalado [Git Bash](https://gitfor-windows.github.io/) para manejar comandos de terminal cómodamente.
+
+```bash
+# Clonar el repositorio
+git clone https://github.com/HarryVargas96/performance-metrics-engine.git
+cd performance-metrics-engine
+
+# Instalar dependencias con Poetry
+poetry install
+```
+
 ### 1. Preparar Strava (API)
 1. Ve a [Strava Settings > My API Application](https://www.strava.com/settings/api).
 2. Crea una aplicación (Nombre: "My PME", Website: "http://localhost").
@@ -81,6 +93,15 @@ make status
 ## ⚙️ Personalización Fisiológica
 
 Puedes ajustar tus umbrales en el `.env` o directamente en `src/core/athlete.py`. El motor recalculará todo tu historial de fatiga y fitness basándose en tus ajustes actuales de FTP y LTHR.
+
+---
+## 📚 Más Información y Dominios
+
+Si quieres profundizar en cómo funciona el motor o en las definiciones científicas detrás de las métricas, consulta nuestra documentación detallada:
+
+*   **[Definición de Métricas](docs/metrics_definitions.md):** Qué significa TSS, CTL, ATL y cómo se calculan para Potencia y Pulso.
+*   **[Arquitectura del Sistema](docs/architecture.md):** Cómo fluye el dato desde Strava hasta el Parquet local.
+*   **[Guía de Clases](docs/classes.md):** Referencia técnica de los módulos y responsabilidades de cada objeto Python.
 
 ---
 > [!TIP]
