@@ -1,39 +1,43 @@
-# Performance Metrics Engine 🏃‍♂️🚴‍♀️
+# Performance Metrics Engine 🚴‍♂️📊
 
-An AI-powered training data pipeline and dashboard designed to ingest raw workout data from the Strava API, compute advanced **Performance Management Chart (PMC)** metrics like Chronic Training Load (CTL), Acute Training Load (ATL), Training Stress Score (TSS), and Fatigue. It ultimately acts as a context engine for Google's Gemini LLM—fed with sports science literature—to generate highly personalized, science-based coaching insights.
+Motor de análisis fisiológico avanzado que integra datos de **Strava** con ciencia del deporte para calcular métricas de rendimiento real (CTL, ATL, TSS).
 
-## Project Vision 🚀
-The fundamental goal of this project is to build a Virtual Endurance Coach. By marrying sports science with cutting-edge artificial intelligence, this engine will:
-1. **Automate Data Extraction:** Continuously pull workout data (distance, duration, heart rate, power, perceived exertion) directly from your devices via Strava.
-2. **Compute Real Physiological Metrics:** Replicate complex calculations typically reserved for premium platforms like TrainingPeaks (calculating rolling averages for CTL, ATL, and TSS).
-3. **Generate Actionable Insights using Generative AI:** Feed these daily metrics, along with curated sports science literature, into **Gemini** to answer questions like:
-   - *"Am I overtraining based on my current TSS ramp rate?"*
-   - *"What kind of workout should I do tomorrow to achieve a positive Form (TSB) for my race this weekend?"*
+## 🚀 Capacidades Recientes
 
-## Desarrollo y Uso
+- **Autenticación Auto-Suficiente:** Integración con Strava OAuth 2.0 que refresca automáticamente el `ACCESS_TOKEN` y actualiza el `.env` dinámicamente.
+- **Motor PMC (Performance Management Chart):** Cálculo de Fitness (CTL), Fatiga (ATL) y Forma (TSB) basado en datos históricos (90 días).
+- **Contexto Avanzado para LLMs:** Generación de resúmenes estructurados en JSON específicamente diseñados para ser interpretados por **Gemini**, incluyendo:
+    - Snapshot actual de métricas PMC.
+    - Tendencias de carga de las últimas 8 semanas.
+    - Detalle de sensaciones y métricas de los últimos 7 días.
+- **Exploración Visual (Notebooks):** Cuaderno interactivo basado en **Plotly** para ver la evolución del fitness y analizar telemetría detallada (potencia/pulso) por segundo.
 
-### 1. Configuración Fisiológica
-Ajusta tu **FTP**, **Max HR** y **Peso** en el archivo central:
-`src/core/athlete.py` (o en su defecto `src/config.py`).
+## 🛠️ Cómo Usar el Sistema
 
-### 2. Sincronización de Datos (Persistence Layer)
-Ejecuta el sincronizador para bajar tu historial de Strava (últimos 90 días), calcular TSS y guardar en formato **Parquet**:
-```powershell
+### 1. Sincronizar Datos (Strava API)
+Este comando descarga tus últimas actividades, calcula su TSS (vía Potencia o Frecuencia Cardíaca) y actualiza el historial local en Parquet.
+```bash
 poetry run python src/services/sync.py
 ```
-*Este proceso descarga automáticamente las descripciones/comentarios de Strava para análisis de sensaciones.*
 
-### 3. Análisis de Actividades Individuales (CLI)
-Para analizar una actividad específica por su ID:
-```powershell
-poetry run python src/main.py <activity_id>
+### 2. Ver Estado Actual (Virtual Coach)
+Muestra un dashboard por consola sobre tu nivel de fatiga, fitness y genera el contexto JSON para tu Coach de IA.
+```bash
+poetry run python src/status.py
 ```
 
-### 4. Coach de Inteligencia Artificial
-Si tienes configurada tu `GEMINI_API_KEY` en el `.env`, puedes obtener consejos expertos:
-```powershell
-poetry run python src/services/coach.py
-```
+### 3. Exploración Interactiva
+Abre el notebook para visualizar gráficamente tu progreso y analizar sesiones específicas.
+*   Archivo: `notebooks/2_fitness_exploration.ipynb`
+*   Requiere: Extensión Jupyter en VS Code.
 
----
-*Developed for training optimization and data-driven athletic performance.*
+## 📁 Estructura del Proyecto
+
+- `src/api/`: Cliente de Strava con rotación de tokens.
+- `src/core/`: Motores de cálculo (PMC, TSS, Athlete Profile).
+- `src/services/`: Lógica de sincronización y reporte para el Coach.
+- `data/`: Almacenamiento eficiente en formato Parquet (`tss_history.parquet`).
+- `notebooks/`: Cuadernos de experimentación y visualización.
+
+## ⚙️ Configuración (Athlete Profile)
+Puedes ajustar tu **FTP**, **LTHR**, **Peso** y **Zonas de Entrenamiento** directamente en `src/config.py`. El sistema recalculará todo el historial automágicamente al siguiente sync.

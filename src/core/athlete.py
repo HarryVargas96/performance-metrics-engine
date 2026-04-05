@@ -51,3 +51,13 @@ class AthleteProfile:
 
     def power_to_weight(self):
         return round(self.ftp / self.weight_kg, 2) if self.weight_kg else None
+
+    def to_dict(self):
+        """Exporta la configuración del atleta a un diccionario."""
+        return {
+            "ftp": self.ftp,
+            "max_hr": self.max_hr,
+            "lthr": self.lthr,
+            "weight_kg": self.weight_kg,
+            "w_kg": self.power_to_weight()
+        }

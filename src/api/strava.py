@@ -4,7 +4,7 @@ import requests
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key, find_dotenv
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,17 +17,67 @@ class StravaClient:
     
     def __init__(self):
         load_dotenv()
-        self.access_token = os.getenv("STRAVA_ACCESS_TOKEN")
         self.base_url = "https://www.strava.com/api/v3"
         
-        if not self.access_token:
-            logger.error("Token de Acceso faltante. Revisa el archivo .env.")
-            raise ValueError("No se encontró el Token de Acceso en las variables de entorno.")
+        # 1. Cargar credenciales desde .env
+        self.client_id = os.getenv("STRAVA_CLIENT_ID")
+        self.client_secret = os.getenv("STRAVA_CLIENT_SECRET")
+        self.access_token = os.getenv("STRAVA_ACCESS_TOKEN")
+        self.refresh_token = os.getenv("STRAVA_REFRESH_TOKEN")
+
+        if not self.access_token or not self.refresh_token:
+            logger.error("Credenciales de Strava incompletas en el .env.")
+            raise ValueError("Faltan tokens o credenciales en las variables de entorno.")
+
+        # 2. Refrescar token automáticamente al inicializar (Garantiza 6h extras de vida)
+        self.refresh_access_token()
             
         self.headers = {
             "Authorization": f"Bearer {self.access_token}"
         }
-        logger.info("StravaClient inicializado correctamente.")
+        logger.info("StravaClient inicializado y autenticado.")
+
+    def refresh_access_token(self):
+        """Usa el REFRESH_TOKEN para obtener un nuevo ACCESS_TOKEN válido."""
+        url = "https://www.strava.com/oauth/token"
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "refresh_token": self.refresh_token,
+            "grant_type": "refresh_token"
+        }
+        
+        logger.info("Refrescando token de acceso con Strava...")
+        response = requests.post(url, data=payload)
+        
+        if response.status_code == 200:
+            data = response.json()
+            self.access_token = data.get("access_token")
+            # A veces Strava también rota el refresh_token
+            nuevo_refresh = data.get("refresh_token")
+            
+            # Actualizar el objeto y el archivo .env para persistencia
+            self.update_env_file(self.access_token, nuevo_refresh)
+            
+            if nuevo_refresh:
+                self.refresh_token = nuevo_refresh
+        else:
+            logger.error("No se pudo refrescar el token de Strava: %s", response.text)
+            response.raise_for_status()
+
+    def update_env_file(self, access_token, refresh_token):
+        """Actualiza el archivo .env local con los nuevos tokens recibidos."""
+        try:
+            env_path = find_dotenv()
+            if env_path:
+                set_key(env_path, "STRAVA_ACCESS_TOKEN", access_token)
+                if refresh_token:
+                    set_key(env_path, "STRAVA_REFRESH_TOKEN", refresh_token)
+                logger.info("Archivo .env actualizado con los nuevos tokens.")
+            else:
+                logger.warning("No se encontró el archivo .env para actualizarlo.")
+        except Exception as e:
+            logger.error("Error actualizando .env: %s", e)
 
     def get_athlete_info(self):
         url = f"{self.base_url}/athlete"

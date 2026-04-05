@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,16 @@ class PMCProcessor:
         
         # Copia para no modificar el original y asegurar formato de fecha
         df = df_tss.copy()
-        df['date'] = pd.to_datetime(df['date'], utc=True).dt.tz_localize(None) # Normalizar a naive
+        # NORMALIZACIÓN: Eliminamos la hora para que coincida con el índice diario
+        df['date'] = pd.to_datetime(df['date'], utc=True).dt.tz_localize(None).dt.normalize()
         
-        df = df.set_index('date').sort_index().resample('D').sum().fillna(0)
+        # Agrupar por día
+        df = df.groupby('date')[['tss']].sum()
+        
+        # RE-INDEX: Forzar que el rango de fechas llegue hasta HOY
+        idx = pd.date_range(df.index.min(), datetime.now().date(), freq='D')
+        df = df.reindex(idx, fill_value=0)
+        df.index.name = 'date'
         
         alpha_ctl = 1.0 / self.ctl_days
         alpha_atl = 1.0 / self.atl_days
