@@ -42,12 +42,27 @@ def get_llm_context(df_history, athlete, pmc_report):
     
     last_7_days_list = []
     for _, row in df_recent.iterrows():
-        last_7_days_list.append({
+        workout = {
             "date": row['date'].strftime('%Y-%m-%d'),
             "name": row['name'],
             "tss": round(row['tss'], 1),
-            "sensations": row['description'][:200] if row['description'] else ""
-        })
+            "tss_source": row.get('tss_source', 'unknown'),
+        }
+        # Combinar descripción pública y notas privadas en un solo campo de contexto
+        notas = []
+        if row.get('description'):
+            notas.append(f"[Público] {str(row['description'])[:150]}")
+        if row.get('private_note'):
+            notas.append(f"[Privado] {str(row['private_note'])[:150]}")
+        workout["sensations"] = " | ".join(notas) if notas else ""
+        
+        # Esfuerzo percibido (RPE 1-10) y puntuación de sufrimiento de Strava
+        if row.get('perceived_exertion') is not None:
+            workout["perceived_exertion_rpe"] = row['perceived_exertion']
+        if row.get('suffer_score') is not None:
+            workout["suffer_score"] = row['suffer_score']
+        
+        last_7_days_list.append(workout)
 
     return {
         "athlete": athlete.to_dict(),
