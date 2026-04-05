@@ -1,11 +1,11 @@
-"""
-Configuración y Constantes del Proyecto.
-Aquí se alojan parámetros que NO son secretos de estado (a diferencia de los tokens de API
-que viven en el .env). Estos son parámetros de dominio o de sesión que la aplicación usa.
+"""Configuración estática y valores por defecto del Performance Metrics Engine.
+
+Este módulo contiene parámetros de dominio que no son sensibles (tokens)
+pero que definen el comportamiento basal de los algoritmos de rendimiento.
 """
 
-# --- PARÁMETROS FISIOLÓGICOS DEL ATLETA ---
-# Ajusta estos valores a tu estado físico actual
+# --- PARÁMETROS FISIOLÓGICOS POR DEFECTO ---
+# Estos valores se usan como fallback si no están definidos en el archivo .env
 DEFAULT_FTP = 200
 DEFAULT_MAX_HR = 195
 DEFAULT_LTHR = 175

@@ -1,4 +1,10 @@
-# src/services/sync.py
+"""Servicio de orquestación para sincronización de datos con Strava.
+
+Este módulo coordina la descarga de actividades, el procesamiento analítico 
+de telemetría y la persistencia en caché local (Parquet). También genera 
+el reporte fisiológico PMC.
+"""
+
 import os
 import argparse
 import pandas as pd
@@ -7,7 +13,7 @@ import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Añadir el raíz del proyecto al path para que "from src..." funcione como script crudo
+# Asegurar que el raíz del proyecto esté en el path para ejecución directa
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from src.api.strava import StravaClient
@@ -15,36 +21,47 @@ from src.core.athlete import AthleteProfile
 from src.core.analytics import ActivityMetricsCalculator
 from src.core.pmc import PMCProcessor
 
+# Configuración de registro centralizado
 logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("data")
-TSS_CACHE_FILE = DATA_DIR / "tss_history.parquet" # CAMBIO: PARQUET
+TSS_CACHE_FILE = DATA_DIR / "tss_history.parquet"
 
 def run_historical_sync(days=90, force_resync=False):
-    """
-    Sincroniza historial usando PARQUET persistente.
-    - days: ventana de días hacia atrás (usa 20 para pruebas rápidas).
-    - force_resync: re-procesa actividades ya existentes si tienen campos subjetivos vacíos.
+    """Ejecuta el proceso completo de sincronización de historial con Strava.
+
+    Descarga telemetría pesada (streams), calcula TSS/NP y persiste los datos
+    subjetivos (RPE, notas privadas) en un archivo Parquet eficiente.
+
+    Args:
+        days (int): Ventana de tiempo hacia atrás a sincronizar.
+        force_resync (bool): Si es True, ignora el caché y reprocesa todo.
+
+    Returns:
+        pd.DataFrame: Historial completo y enriquecido de actividades.
     """
     DATA_DIR.mkdir(exist_ok=True)
     
-    client = StravaClient()
-    athlete = AthleteProfile()
-    calc = ActivityMetricsCalculator(athlete)
+    try:
+        client = StravaClient()
+        athlete = AthleteProfile()
+        calc = ActivityMetricsCalculator(athlete)
+    except Exception as e:
+        logger.error("No se pudo inicializar los clientes necesarios para sync: %s", e)
+        return pd.DataFrame()
     
-    # 1. Cargar caché Parquet
+    # Carga de la base de datos local
     if TSS_CACHE_FILE.exists():
         df_cache = pd.read_parquet(TSS_CACHE_FILE)
         if 'date' in df_cache.columns:
             df_cache['date'] = pd.to_datetime(df_cache['date'])
         
-        # Detectar IDs sin campos subjetivos (schema migration)
         nuevos_campos = ['private_note', 'perceived_exertion', 'suffer_score']
         if force_resync or not all(c in df_cache.columns for c in nuevos_campos):
-            logger.info("Re-sync forzado: se reprocesarán actividades sin datos subjetivos...")
-            existentes_ids = set()  # Re-process all
+            logger.info("Migración de datos necesaria o re-sync forzado detectado.")
+            existentes_ids = set()
         else:
-            # Excluir del caché los IDs donde los campos subjetivos son todos NaN
+            # Re-sincronizar solo las actividades que no tienen datos subjetivos (Subjective Gap)
             mask_sin_datos = (
                 df_cache.get('private_note', pd.Series([None]*len(df_cache))).isna() &
                 df_cache.get('perceived_exertion', pd.Series([None]*len(df_cache))).isna()
@@ -52,7 +69,7 @@ def run_historical_sync(days=90, force_resync=False):
             ids_sin_datos = set(df_cache[mask_sin_datos]['id'].tolist())
             existentes_ids = set(df_cache['id'].tolist()) - ids_sin_datos
             if ids_sin_datos:
-                logger.info("%d actividades sin datos subjetivos serán re-procesadas.", len(ids_sin_datos))
+                logger.info("%d sesiones requieren re-sincronización de campos subjetivos...", len(ids_sin_datos))
     else:
         df_cache = pd.DataFrame(columns=[
             'id', 'date', 'name', 'description', 'private_note',
@@ -61,24 +78,24 @@ def run_historical_sync(days=90, force_resync=False):
         ])
         existentes_ids = set()
 
+    # Recuperación de metadatos de Strava
     actividades_meta = client.get_recent_activities(days=days, per_page=200, return_dataframe=True)
-    if actividades_meta.empty: return df_cache
+    if actividades_meta.empty: 
+        logger.info("No se encontraron actividades nuevas en Strava.")
+        return df_cache
 
     nuevas_filas = []
     for _, act in actividades_meta.iterrows():
         act_id = act['id']
-        if act_id in existentes_ids: continue
+        if act_id in existentes_ids:
+            continue
             
-        logger.info("🚀 Procesando: %s...", act['name'])
+        logger.info("⚡ Sincronizando: %s (%s)...", act['name'], act['start_date_local'])
         try:
-            # Traer detalles completos: descripción, notas privadas y sensaciones subjetivas
+            # Recuperar detalle (notas privadas) y streams (telemetría)
             detalle_act = client.get_activity(act_id)
-            comentarios_publicos = detalle_act.get('description', '') or ''
-            notas_privadas = detalle_act.get('private_note', '') or ''
-            esfuerzo_percibido = detalle_act.get('perceived_exertion')  # RPE 1-10
-            suffer_score = detalle_act.get('suffer_score')              # Puntuación Strava
-            
             df_stream = client.get_activity_streams(act_id, start_date=act['start_date_local'])
+            
             if df_stream is not None and not df_stream.empty:
                 summary = calc.process_full_activity_summary(df_stream)
                 
@@ -86,73 +103,71 @@ def run_historical_sync(days=90, force_resync=False):
                     'id': act_id,
                     'date': pd.to_datetime(act['start_date_local']),
                     'name': act['name'],
-                    'description': comentarios_publicos,
-                    'private_note': notas_privadas,
-                    'perceived_exertion': esfuerzo_percibido,
-                    'suffer_score': suffer_score,
+                    'description': detalle_act.get('description', '') or '',
+                    'private_note': detalle_act.get('private_note', '') or '',
+                    'perceived_exertion': detalle_act.get('perceived_exertion'),
+                    'suffer_score': detalle_act.get('suffer_score'),
                     'tss': summary['training_stress_score'],
                     'tss_source': summary['tss_source'],
                     'hr_tss': summary['hr_tss'],
                     'pwr_tss': summary['pwr_tss']
                 })
         except Exception as e:
-            logger.error("Error en %s: %s", act_id, e)
+            logger.error("Fallo inesperado al procesar actividad ID %s: %s", act_id, e)
 
     if nuevas_filas:
         df_nuevas = pd.DataFrame(nuevas_filas)
-        # IMPORTANTE: nuevas primero → drop_duplicates(keep='first') preserva los datos frescos
+        # Concatenar prefiriendo datos nuevos en caso de IDs duplicadas (keep='first')
         df_final = pd.concat([df_nuevas, df_cache]).drop_duplicates(subset=['id'], keep='first').reset_index(drop=True)
         df_final.to_parquet(TSS_CACHE_FILE, index=False)
-        logger.info("✅ Sincronización exitosa en data/tss_history.parquet (%d actividades)", len(df_final))
+        logger.info("Sincronización finalizada satisfactoriamente. Total: %d registros.", len(df_final))
     else:
         df_final = df_cache
-        logger.info("ℹ️  Sin actividades nuevas. Caché actualizado.")
+        logger.info("Caché local está actualizado. No se detectaron cambios requeridos.")
 
     return df_final
 
-def generate_pmc_report(df_tss):
-    if df_tss.empty: return {}
+def generate_pmc_report(df_tss: pd.DataFrame) -> dict:
+    """Calcula el estado metabólico actual (PMC) del atleta a partir del historial.
+
+    Args:
+        df_tss (pd.DataFrame): DataFrame con historial de TSS.
+
+    Returns:
+        dict: Snapshot resumido de CTL, ATL y TSB.
+    """
+    if df_tss.empty:
+        return {}
     pmc = PMCProcessor()
     df_pmc = pmc.calculate_pmc(df_tss[['date', 'tss']])
     return pmc.get_summary(df_pmc)
 
-if __name__ == "__main__":
+def main():
+    """Entrada principal del ejecutable de sincronización CLI."""
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-    parser = argparse.ArgumentParser(description="Sincroniza actividades de Strava y actualiza el historial PMC.")
-    parser.add_argument(
-        "--days", type=int, default=90,
-        help="Número de días hacia atrás a sincronizar (default: 90). Usa 20 para pruebas rápidas."
-    )
-    parser.add_argument(
-        "--force-resync", action="store_true",
-        help="Re-procesa todas las actividades ignorando el caché de IDs ya existentes."
-    )
+    parser = argparse.ArgumentParser(description="Performance Metrics Engine - Sync Tool")
+    parser.add_argument("--days", type=int, default=90, help="Ventana de días hacia atrás.")
+    parser.add_argument("--force-resync", action="store_true", help="Reprocesar todo ignorando caché.")
     args = parser.parse_args()
 
-    print(f"=== INICIANDO SINCRONIZACIÓN (ventana: {args.days} días) ===")
+    logger.info("--- INICIANDO MOTOR DE SINCRONIZACIÓN ---")
     df = run_historical_sync(days=args.days, force_resync=args.force_resync)
     
     if not df.empty:
         reporte = generate_pmc_report(df)
-        print("\n📈 ESTADO ACTUAL DEL ATLETA (PMC):")
-        print(f"   CTL (Fitness): {reporte['ctl']}")
-        print(f"   ATL (Fatigue): {reporte['atl']}")
-        print(f"   TSB (Form):    {reporte['tsb']}")
+        logger.info("ESTADO ACTUAL PMC:")
+        logger.info(f"   CTL (Fitness): {reporte['ctl']}")
+        logger.info(f"   ATL (Fatiga): {reporte['atl']}")
+        logger.info(f"   TSB (Form):    {reporte['tsb']}")
         
-        # Análisis de impacto de la última semana
+        # Última semana
         df['date'] = pd.to_datetime(df['date'], utc=True).dt.tz_localize(None)
-        semana_atras = datetime.now() - timedelta(days=7)
-        ultimos_7_dias = df[df['date'] >= semana_atras]
-        tss_semanal = ultimos_7_dias['tss'].sum()
-        print(f"   Carga Semanal (TSS): {round(tss_semanal, 1)}")
-        
-        if tss_semanal > (reporte['ctl'] * 7 * 1.2):
-            print("   🚀 IMPACTO: Semana de carga alta. Tu fatiga (ATL) está subiendo rápido.")
-        elif tss_semanal < (reporte['ctl'] * 7 * 0.7):
-            print("   💤 IMPACTO: Semana de descarga o inactividad. Tu Fitness (CTL) podría estancarse.")
-        else:
-            print("   ✅ IMPACTO: Carga estable. Manteniendo el Fitness.")
+        ultimos_7 = df[df['date'] >= (datetime.now() - timedelta(days=7))]
+        tss_semana = round(ultimos_7['tss'].sum(), 1)
+        logger.info(f"   Carga Semanal (TSS): {tss_semana}")
     else:
-        print("No hay datos suficientes para generar el reporte PMC.")
+        logger.warning("No hay suficientes datos procesados para generar el reporte.")
 
+if __name__ == "__main__":
+    main()
