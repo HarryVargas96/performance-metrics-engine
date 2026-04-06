@@ -192,9 +192,12 @@ class ActivityMetricsCalculator:
         
         logger.info("Procesamiento completo de actividad finalizado (TSS Final: %s).", tss_final)
         
+        avg_cadence = float(df_streams['cadence'].mean()) if 'cadence' in df_streams.columns else 0.0
+        
         return {
             'activity_duration_minutes': round(duration_seconds / 60, 2),
             'average_power': round(avg_power, 2),
+            'average_cadence': round(avg_cadence, 1),
             'normalized_power': np_val,
             'variability_index': self.calculate_variability_index(np_val, avg_power),
             'intensity_factor': tss_if_val['IF'],

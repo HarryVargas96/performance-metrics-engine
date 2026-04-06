@@ -56,25 +56,26 @@ def run_historical_sync(days=90, force_resync=False):
         if 'date' in df_cache.columns:
             df_cache['date'] = pd.to_datetime(df_cache['date'])
         
-        nuevos_campos = ['private_note', 'perceived_exertion', 'suffer_score']
+        nuevos_campos = ['private_note', 'perceived_exertion', 'suffer_score', 'total_elevation_gain', 'average_cadence', 'time_in_zones_power']
         if force_resync or not all(c in df_cache.columns for c in nuevos_campos):
             logger.info("Migración de datos necesaria o re-sync forzado detectado.")
             existentes_ids = set()
         else:
-            # Re-sincronizar solo las actividades que no tienen datos subjetivos (Subjective Gap)
+            # Re-sincronizar solo las actividades que no tienen datos subjetivos o métricas físicas nuevas
             mask_sin_datos = (
-                df_cache.get('private_note', pd.Series([None]*len(df_cache))).isna() &
-                df_cache.get('perceived_exertion', pd.Series([None]*len(df_cache))).isna()
+                df_cache.get('total_elevation_gain', pd.Series([None]*len(df_cache))).isna() |
+                df_cache.get('average_cadence', pd.Series([None]*len(df_cache))).isna() |
+                df_cache.get('time_in_zones_power', pd.Series([None]*len(df_cache))).isna()
             )
             ids_sin_datos = set(df_cache[mask_sin_datos]['id'].tolist())
             existentes_ids = set(df_cache['id'].tolist()) - ids_sin_datos
             if ids_sin_datos:
-                logger.info("%d sesiones requieren re-sincronización de campos subjetivos...", len(ids_sin_datos))
+                logger.info("%d sesiones requieren re-sincronización de métricas enriquecidas...", len(ids_sin_datos))
     else:
         df_cache = pd.DataFrame(columns=[
             'id', 'date', 'name', 'description', 'private_note',
-            'perceived_exertion', 'suffer_score',
-            'tss', 'tss_source', 'hr_tss', 'pwr_tss'
+            'perceived_exertion', 'suffer_score', 'total_elevation_gain', 'average_cadence',
+            'tss', 'tss_source', 'hr_tss', 'pwr_tss', 'time_in_zones_power'
         ])
         existentes_ids = set()
 
@@ -107,10 +108,13 @@ def run_historical_sync(days=90, force_resync=False):
                     'private_note': detalle_act.get('private_note', '') or '',
                     'perceived_exertion': detalle_act.get('perceived_exertion'),
                     'suffer_score': detalle_act.get('suffer_score'),
+                    'total_elevation_gain': act.get('total_elevation_gain', 0.0),
+                    'average_cadence': summary.get('average_cadence', 0.0),
                     'tss': summary['training_stress_score'],
                     'tss_source': summary['tss_source'],
                     'hr_tss': summary['hr_tss'],
-                    'pwr_tss': summary['pwr_tss']
+                    'pwr_tss': summary['pwr_tss'],
+                    'time_in_zones_power': summary.get('time_in_zones_power', {})
                 })
         except Exception as e:
             logger.error("Fallo inesperado al procesar actividad ID %s: %s", act_id, e)

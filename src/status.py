@@ -53,10 +53,20 @@ def get_llm_context(days_back=90) -> dict:
     # Agrupamos en bloques de 7 días exactos
     weekly_tss = [round(float(df_resampled.iloc[i : i+7].sum()), 1) for i in range(0, 56, 7)]
     
-    # 2. Resumen detallado: Últimos 7 días activos
+    # 2. Resumen detallado y Agregados: Últimos 7 días activos
     semana_atras = hoy - pd.Timedelta(days=7)
-    # Forzamos tz_localize(None) para evitar error de comparación con 'hoy' (naive)
     df_recent = df_history[pd.to_datetime(df_history['date'], utc=True).dt.tz_localize(None).dt.normalize() >= semana_atras].sort_values('date')
+    
+    # Agregados semanales
+    total_elevation_weekly = round(float(df_recent['total_elevation_gain'].sum()), 1) if 'total_elevation_gain' in df_recent.columns else 0
+    
+    # Distribución de zonas semanal (Power)
+    weekly_zones = {}
+    if 'time_in_zones_power' in df_recent.columns:
+        for zones in df_recent['time_in_zones_power']:
+            if isinstance(zones, dict):
+                for z_name, data in zones.items():
+                    weekly_zones[z_name] = weekly_zones.get(z_name, 0) + data.get('minutes', 0)
     
     last_7_days_list = []
     for _, row in df_recent.iterrows():
@@ -65,9 +75,12 @@ def get_llm_context(days_back=90) -> dict:
             "name": row['name'],
             "tss": round(row['tss'], 1),
             "tss_source": row.get('tss_source', 'unknown'),
+            "elevation_gain": round(float(row.get('total_elevation_gain', 0)), 1),
+            "avg_cadence": round(float(row.get('average_cadence', 0)), 1),
+            "power_zones": {k: round(v.get('minutes', 0), 1) for k, v in row.get('time_in_zones_power', {}).items()} if isinstance(row.get('time_in_zones_power'), dict) else {}
         }
         
-        # Enriquecimiento subjetivo: Público + Privado + RPE
+        # Enriquecimiento subjetivo
         notas = []
         if row.get('description'):
             notas.append(f"[Público] {str(row['description'])[:150]}")
@@ -78,16 +91,18 @@ def get_llm_context(days_back=90) -> dict:
         
         if row.get('perceived_exertion') is not None:
             workout["perceived_exertion_rpe"] = row['perceived_exertion']
-        if row.get('suffer_score') is not None:
-            workout["suffer_score"] = row['suffer_score']
         
         last_7_days_list.append(workout)
 
-    logger.info("Contexto LLM construido satisfactoriamente con %d sesiones recientes.", len(last_7_days_list))
+    logger.info("Contexto LLM construido con %d sesiones y agregados semanales.", len(last_7_days_list))
 
     return {
         "athlete": athlete.to_dict(),
         "pmc_snapshot": pmc_report,
+        "week_summary": {
+            "total_elevation": total_elevation_weekly,
+            "power_zones_distribution_min": {k: round(v, 1) for k, v in weekly_zones.items()}
+        },
         "trends": {
             "last_8_weeks_tss": weekly_tss,
             "weekly_avg_tss": round(sum(weekly_tss)/len(weekly_tss), 1) if weekly_tss else 0
